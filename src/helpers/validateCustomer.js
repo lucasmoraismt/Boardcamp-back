@@ -1,6 +1,5 @@
 import joi from "joi";
 import dayjs from "dayjs";
-import { request } from "express";
 
 export default function validateCustomer({ name, phone, cpf, birthday }) {
   const customerSchema = joi.object({
@@ -12,7 +11,7 @@ export default function validateCustomer({ name, phone, cpf, birthday }) {
       .required(),
   });
 
-  const validation = customerSchema.validate({ name, phone, cpf, birthday });
+  const validation = customerSchema.validate({ name, phone, cpf });
 
   if (!!validation.error) {
     return false;

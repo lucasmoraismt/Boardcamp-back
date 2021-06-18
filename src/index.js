@@ -4,6 +4,9 @@ import pg from "pg";
 
 import validateGame from "./helpers/validateGame.js";
 import validateCustomer from "./helpers/validateCustomer.js";
+import validateRentals from "./helpers/validateRentals.js";
+import validateReturn from "./helpers/validateReturn.js";
+import dayjs from "dayjs";
 
 pg.types.setTypeParser(1082, (str) => str);
 
@@ -35,9 +38,9 @@ app.get("/categories", async (req, res) => {
 });
 
 app.post("/categories", async (req, res) => {
-  const body = req.body;
+  const { name } = req.body;
 
-  if (!body.name || body.name.trim().length === 0) {
+  if (!name || name.trim().length === 0) {
     return res.sendStatus(400);
   }
 
@@ -49,7 +52,7 @@ app.post("/categories", async (req, res) => {
     WHERE NOT EXISTS (
       SELECT 1 FROM categories WHERE name=$1
       )`,
-      [body.name.toLowerCase()]
+      [name.toLowerCase()]
     );
 
     if (request.rowCount === 0) {
@@ -70,7 +73,6 @@ app.get("/games", async (req, res) => {
 
   if (!!req.query.name) {
     queryText += ` WHERE games.name ILIKE '${req.query.name}%'`;
-    console.log(queryText, req.query.name);
   }
 
   try {
@@ -83,8 +85,8 @@ app.get("/games", async (req, res) => {
 });
 
 app.post("/games", async (req, res) => {
-  const body = req.body;
-  const isBodyValid = validateGame(body);
+  const { name, image, stockTotal, categoryId, pricePerDay } = req.body;
+  const isBodyValid = await validateGame(req.body);
 
   if (!isBodyValid) {
     res.sendStatus(400);
@@ -96,11 +98,11 @@ app.post("/games", async (req, res) => {
         WHERE NOT EXISTS (SELECT 1 FROM games WHERE name=$1)
       `,
         [
-          body.name.toLowerCase(),
-          body.image,
-          parseInt(body.stockTotal),
-          parseInt(body.categoryId),
-          parseInt(body.pricePerDay),
+          name.toLowerCase(),
+          image,
+          parseInt(stockTotal),
+          parseInt(categoryId),
+          parseInt(pricePerDay),
         ]
       );
 
@@ -155,9 +157,125 @@ app.post("/customers", async (req, res) => {
   }
 
   try {
-    await connection.query(
-      `INSERT INTO customers (name, phone, cpf, birthday) VALUES ($1, $2, $3, $4)`,
+    const request = await connection.query(
+      `INSERT INTO customers (name, phone, cpf, birthday) 
+      SELECT $1, $2, $3, $4 
+      WHERE NOT EXISTS (SELECT 1 FROM customers WHERE cpf = $3)`,
       [name, phone, cpf, birthday]
+    );
+
+    if (request.rowCount === 0) {
+      res.sendStatus(409);
+    } else {
+      res.sendStatus(201);
+    }
+  } catch (err) {
+    res.sendStatus(500);
+  }
+});
+
+app.get("/rentals", async (req, res) => {
+  let queryString = `
+  SELECT rentals.*, 
+  jsonb_build_object('name', customers.name, 'id', customers.id) AS customer,
+  jsonb_build_object('id', games.id, 'name', games.name, 'categoryId', games."categoryId", 'categoryName', categories.name) AS game
+  FROM rentals 
+  JOIN customers ON rentals."customerId" = customers.id
+  JOIN games ON rentals."gameId" = games.id
+  JOIN categories ON categories.id = games."categoryId"`;
+
+  const customerId = req.params.customerId;
+  const gameId = req.params.gameId;
+  try {
+    if (!!customerId) {
+      queryString = `
+      SELECT rentals.*, 
+      jsonb_build_object('name', customers.name, 'id', customers.id) AS customer,
+      jsonb_build_object('id', games.id, 'name', games.name, 'categoryId', games."categoryId", 'categoryName', categories.name) AS game
+      FROM rentals 
+      JOIN customers ON rentals."customerId" = customers.id WHERE "customerId" = $1
+      JOIN games ON rentals."gameId" = games.id
+      JOIN categories ON categories.id = games."categoryId"`;
+      const request = await connection.query(queryString, [customerId]);
+
+      res.status(200).send(request.rows);
+    } else if (!!gameId) {
+      queryString += `
+      SELECT rentals.*, 
+      jsonb_build_object('name', customers.name, 'id', customers.id) AS customer,
+      jsonb_build_object('id', games.id, 'name', games.name, 'categoryId', games."categoryId", 'categoryName', categories.name) AS game
+      FROM rentals 
+      JOIN customers ON rentals."customerId" = customers.id
+      JOIN games ON rentals."gameId" = games.id WHERE "gameId" = $1
+      JOIN categories ON categories.id = games."categoryId"`;
+      const request = await connection.query(queryString, [gameId]);
+
+      res.status(200).send(request.rows);
+    } else {
+      const request = await connection.query(queryString);
+
+      res.status(200).send(request.rows);
+    }
+  } catch {
+    res.sendStatus(500);
+  }
+});
+
+app.post("/rentals", async (req, res) => {
+  const { customerId, gameId, daysRented } = req.body;
+  const isBodyValid = await validateRentals(req.body, connection);
+
+  if (!isBodyValid) {
+    res.sendStatus(400);
+  } else {
+    try {
+      const request = await connection.query(
+        `
+      INSERT INTO rentals ("customerId", "gameId",  "rentDate", "daysRented", "returnDate", "originalPrice", "delayFee") 
+      SELECT $1, $2, $3, $4, $5, $4 * games."pricePerDay" AS "originalPrice", $6 
+      FROM games, customers WHERE customers.id = $1 AND games.id = $2`,
+        [
+          customerId,
+          gameId,
+          dayjs().format("YYYY-MM-DD"),
+          daysRented,
+          null,
+          null,
+        ]
+      );
+
+      if (request.rowCount === 0) {
+        res.sendStatus(400);
+      } else {
+        res.sendStatus(201);
+      }
+    } catch (err) {
+      res.sendStatus(500);
+    }
+  }
+});
+
+app.post("/rentals/:id/return", async (req, res) => {
+  const id = req.params.id;
+  const validation = await validateReturn(id, connection);
+
+  if (typeof validation === "number") {
+    return res.sendStatus(validation);
+  }
+
+  try {
+    const returnDate = dayjs().format("YYYY-MM-DD");
+    let diff = dayjs().diff(validation.rentDate, "day");
+    let delayFee = null;
+
+    if (diff - validation.daysRented > 0) {
+      delayFee = 0;
+    } else {
+      delayFee = diff * (validation.originalPrice / validation.daysRented);
+    }
+    const request = await connection.query(
+      `UPDATE rentals SET "returnDate" = $1, "delayFee" = $2`,
+      [returnDate, delayFee]
     );
 
     res.sendStatus(200);
@@ -165,7 +283,5 @@ app.post("/customers", async (req, res) => {
     res.sendStatus(500);
   }
 });
-
-app.get("/rentals", async (req, res) => {});
 
 app.listen(4000);
