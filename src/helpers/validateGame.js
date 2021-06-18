@@ -9,7 +9,7 @@ export default function validateGame({
   pricePerDay,
 }) {
   const gameSchema = joi.object({
-    name: joi.string().min(1).max(50).required(),
+    name: joi.string().min(1).required(),
     image: joi.string().min(1).required(),
     stockTotal: joi.number().positive().required(),
     categoryId: joi.number().positive().required(),

@@ -3,6 +3,7 @@ import cors from "cors";
 import pg from "pg";
 
 import validateGame from "./helpers/validateGame.js";
+import validateCustomer from "./helpers/validateCustomer.js";
 
 pg.types.setTypeParser(1082, (str) => str);
 
@@ -85,11 +86,9 @@ app.post("/games", async (req, res) => {
   const body = req.body;
   const isBodyValid = validateGame(body);
 
-  console.log(isBodyValid);
   if (!isBodyValid) {
     res.sendStatus(400);
   } else {
-    console.log(body.name.toLowerCase());
     try {
       const request = await connection.query(
         `INSERT INTO games (name, image, "stockTotal", "categoryId", "pricePerDay") 
@@ -116,6 +115,57 @@ app.post("/games", async (req, res) => {
   }
 });
 
-app.get("/customers", async (req, res) => {});
+app.get("/customers", async (req, res) => {
+  let queryString = `SELECT * FROM customers`;
+
+  if (!!req.query.cpf) {
+    queryString += ` WHERE cpf='${req.query.cpf}%'`;
+  }
+
+  try {
+    const request = await connection.query(queryString);
+
+    res.status(200).send(request.rows);
+  } catch {
+    res.sendStatus(500);
+  }
+});
+
+app.get("/customers/:id", async (req, res) => {
+  const id = req.params.id;
+
+  try {
+    const request = connection.query(
+      `SELECT * FROM customers WHERE customers.id = $1`,
+      [id]
+    );
+
+    res.status(200).send(request.rows);
+  } catch {
+    res.sendStatus(500);
+  }
+});
+
+app.post("/customers", async (req, res) => {
+  const { name, phone, cpf, birthday } = req.body;
+  const isBodyValid = validateCustomer(req.body);
+
+  if (!isBodyValid) {
+    return res.sendStatus(400);
+  }
+
+  try {
+    await connection.query(
+      `INSERT INTO customers (name, phone, cpf, birthday) VALUES ($1, $2, $3, $4)`,
+      [name, phone, cpf, birthday]
+    );
+
+    res.sendStatus(200);
+  } catch {
+    res.sendStatus(500);
+  }
+});
+
+app.get("/rentals", async (req, res) => {});
 
 app.listen(4000);
