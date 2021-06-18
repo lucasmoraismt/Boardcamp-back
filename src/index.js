@@ -27,7 +27,7 @@ app.use(express.json());
 app.get("/categories", async (req, res) => {
   try {
     const request = await connection.query(
-      `SELECT id, INITCAP(name) as name 
+      `SELECT categories.id, INITCAP(categories.name) AS name 
       FROM categories;`
     );
 
@@ -67,9 +67,8 @@ app.post("/categories", async (req, res) => {
 
 app.get("/games", async (req, res) => {
   let queryText = `
-  SELECT games.id, INITCAP(games.name) AS name, games.image, games.stockTotal, games.categoryId, games.pricePerDay, categories.name AS "categoryName"
-  FROM games JOIN categories
-  ON games."categoryId" = categories.id`;
+  SELECT games.id, INITCAP(games.name) AS name, games.image, games."stockTotal", games."categoryId", games."pricePerDay", INITCAP(categories.name) AS "categoryName" 
+  FROM games JOIN categories ON games."categoryId"= categories.id`;
 
   if (!!req.query.name) {
     queryText += ` WHERE games.name ILIKE '${req.query.name}%'`;
@@ -137,12 +136,12 @@ app.get("/customers/:id", async (req, res) => {
   const id = req.params.id;
 
   try {
-    const request = connection.query(
-      `SELECT * FROM customers WHERE customers.id = $1`,
+    const request = await connection.query(
+      `SELECT * FROM customers WHERE id = $1`,
       [id]
     );
 
-    res.status(200).send(request.rows);
+    res.status(200).send(request.rows[0]);
   } catch {
     res.sendStatus(500);
   }
@@ -178,7 +177,7 @@ app.get("/rentals", async (req, res) => {
   let queryString = `
   SELECT rentals.*, 
   jsonb_build_object('name', customers.name, 'id', customers.id) AS customer,
-  jsonb_build_object('id', games.id, 'name', games.name, 'categoryId', games."categoryId", 'categoryName', categories.name) AS game
+  jsonb_build_object('id', games.id, 'name', INITCAP (games.name), 'categoryId', games."categoryId", 'categoryName', categories.name) AS game
   FROM rentals 
   JOIN customers ON rentals."customerId" = customers.id
   JOIN games ON rentals."gameId" = games.id
