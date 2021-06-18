@@ -284,4 +284,24 @@ app.post("/rentals/:id/return", async (req, res) => {
   }
 });
 
+app.delete("/rentals/:id", async (req, res) => {
+  const id = req.params.id;
+  const validation = await validateReturn(id, connection);
+
+  if (typeof validation === "number") {
+    return res.sendStatus(validation);
+  }
+
+  try {
+    const request = await connection.query(
+      `DELETE FROM rentals WHERE rentals.id = $1`,
+      [id]
+    );
+
+    res.sendStatus(200);
+  } catch {
+    res.sendStatus(500);
+  }
+});
+
 app.listen(4000);
